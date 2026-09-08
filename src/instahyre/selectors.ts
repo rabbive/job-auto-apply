@@ -6,7 +6,6 @@
  * class "application-modal-backdrop".
  */
 export const IH = {
-  // ── Opportunities listing page ────────────────────────────────────────────
 
   /**
    * The green "View »" button on each job card. Must be specific to avoid
@@ -21,7 +20,6 @@ export const IH = {
    */
   nextPageButton: ':has-text("Next »")',
 
-  // ── Job detail modal (AngularJS) ──────────────────────────────────────────
 
   /** The backdrop that covers the page when a job modal is open. */
   modalBackdrop: '.application-modal-backdrop',
@@ -45,14 +43,12 @@ export const IH = {
     'span:has-text("Already applied")',
   ].join(', '),
 
-  // ── Success detection ─────────────────────────────────────────────────────
 
   /** Toast that appears at bottom-right: "Application sent to [Company]!" */
   successToast: [
     ':has-text("Application sent")',
   ].join(', '),
 
-  // ── Safety ────────────────────────────────────────────────────────────────
 
   captcha: [
     'iframe[src*="recaptcha"]',

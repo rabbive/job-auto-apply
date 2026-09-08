@@ -5,7 +5,6 @@ import * as log from '../logger.js';
 
 const SCREENSHOTS_DIR = path.resolve('screenshots');
 
-// ─── Result types ────────────────────────────────────────────────────────────
 
 export type ApplicationResult =
   | 'applied'
@@ -14,9 +13,9 @@ export type ApplicationResult =
   | 'skipped_mandatory_fields'
   | 'skipped_captcha'
   | 'skipped_no_apply_button'
+  | 'skipped_rate_limited'
   | 'skipped_error';
 
-// ─── Modal helpers ────────────────────────────────────────────────────────────
 
 /**
  * Clicks the Apply button and detects what Wellfound does next.
@@ -49,7 +48,7 @@ export async function openApplication(
   await page.waitForTimeout(2500);
   context.off('page', tabHandler);
 
-  // ── 1. New tab opened? ─────────────────────────────────────────────────────
+  // 1. New tab opened?
   if (newTabPage) {
     const tabUrl = (newTabPage as Page).url();
     await (newTabPage as Page).close().catch(() => {});
@@ -61,14 +60,14 @@ export async function openApplication(
     // The application form might still be on the original page, so fall through.
   }
 
-  // ── 2. Current tab navigated to a Wellfound apply URL? ────────────────────
+  // 2. Current tab navigated to a Wellfound apply URL?
   const urlAfter = page.url();
   if (urlAfter !== urlBefore) {
     if (!WELLFOUND_DOMAIN_RE.test(urlAfter)) return null; // External redirect
     return mainArea(page);
   }
 
-  // ── 3. ReactModal overlay appeared? (Wellfound's react-modal) ─────────────
+  // 3. ReactModal overlay appeared? (Wellfound's react-modal)
   // The overlay lives inside ReactModalPortal and covers the entire viewport.
   // Buttons INSIDE it are clickable (they're descendants, not behind it).
   const overlay = page.locator('.ReactModal__Overlay--after-open').first();
@@ -77,14 +76,14 @@ export async function openApplication(
     return overlay;
   }
 
-  // ── 4. Standard dialog / aria-modal? ──────────────────────────────────────
+  // 4. Standard dialog / aria-modal?
   const dialog = page.locator('[role="dialog"], [aria-modal="true"]').first();
   if (await dialog.isVisible().catch(() => false)) {
     log.info('Detected ARIA dialog');
     return dialog;
   }
 
-  // ── 5. Submit button inside ReactModalPortal? ─────────────────────────────
+  // 5. Submit button inside ReactModalPortal?
   // The portal might use custom class names we didn't anticipate.
   const portalSubmit = page
     .locator('.ReactModalPortal')
@@ -100,7 +99,7 @@ export async function openApplication(
     return page.locator('.ReactModalPortal').first();
   }
 
-  // ── 6. Nothing detected ────────────────────────────────────────────────────
+  // 6. Nothing detected
   const screenshotPath = await takeDebugScreenshot(page, 'apply_no_form_detected');
   log.info(`No application form detected. Screenshot saved: ${screenshotPath}`);
   return null;
@@ -125,9 +124,6 @@ export async function isExternalApplication(modal: Locator): Promise<boolean> {
   return externalBtn.isVisible().catch(() => false);
 }
 
-/**
- * Returns `true` if the modal contains a CAPTCHA challenge.
- */
 export async function hasCaptcha(modal: Locator): Promise<boolean> {
   return modal
     .locator(SELECTORS.captcha)
@@ -177,6 +173,18 @@ export async function hasMandatoryAdditionalFields(modal: Locator): Promise<bool
 }
 
 /**
+ * Returns true if Wellfound is showing the "maximum active applications" error.
+ * This is an account-level cap (~40-50 concurrent), not a temporary rate limit.
+ */
+export async function hasApplicationLimitError(modal: Locator): Promise<boolean> {
+  return modal
+    .locator(SELECTORS.applicationLimitError)
+    .first()
+    .isVisible()
+    .catch(() => false);
+}
+
+/**
  * Clicks the submit button inside the modal and waits for confirmation.
  *
  * Returns `true` on success, `false` if validation errors appear or the
@@ -186,6 +194,9 @@ export async function submitApplication(
   page: Page,
   modal: Locator,
 ): Promise<boolean> {
+  // Check for the account-level application limit before clicking.
+  if (await hasApplicationLimitError(modal)) return false;
+
   // Find the submit button INSIDE the modal container only.
   // Never search the whole page — that finds the background "Apply now" button
   // which is blocked by the ReactModal overlay.
@@ -263,7 +274,6 @@ export async function verifyApplication(page: Page): Promise<boolean> {
   return applied.isVisible().catch(() => false);
 }
 
-// ─── Screenshot helper ────────────────────────────────────────────────────────
 
 /**
  * Takes a debug screenshot and saves it in the ./screenshots directory.
@@ -281,7 +291,6 @@ export async function takeDebugScreenshot(
   return file;
 }
 
-// ─── Dismiss modal ────────────────────────────────────────────────────────────
 
 /**
  * Attempts to dismiss / close the application modal without submitting.

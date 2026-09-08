@@ -4,7 +4,6 @@ import * as log from '../logger.js';
 
 const WELLFOUND_BASE = 'https://wellfound.com';
 
-// ─── Job listing collection ──────────────────────────────────────────────────
 
 /**
  * Scrolls through the current Wellfound filtered-results page, clicking
@@ -23,7 +22,7 @@ export async function getJobListings(page: Page): Promise<string[]> {
   while (stableRounds < MAX_STABLE_ROUNDS) {
     const countBefore = seen.size;
 
-    // ── Harvest currently visible job links ──────────────────────────────
+    // Harvest currently visible job links
     // We query both generic /jobs/ links AND the "Learn more" anchor buttons
     // that Wellfound uses on its current listing-card UI. Both resolve to the
     // same job detail URLs so deduplication handles overlaps.
@@ -50,7 +49,7 @@ export async function getJobListings(page: Page): Promise<string[]> {
       }
     }
 
-    // ── Try "Load more" button ───────────────────────────────────────────
+    // Try "Load more" button
     const loadMore = page.locator(SELECTORS.loadMoreButton).first();
     const loadMoreVisible = await loadMore.isVisible().catch(() => false);
 
@@ -67,7 +66,7 @@ export async function getJobListings(page: Page): Promise<string[]> {
       await page.waitForTimeout(2000);
     }
 
-    // ── Stability check ──────────────────────────────────────────────────
+    // Stability check
     if (seen.size === countBefore) {
       stableRounds++;
     } else {
@@ -79,7 +78,6 @@ export async function getJobListings(page: Page): Promise<string[]> {
   return [...seen];
 }
 
-// ─── Per-job helpers ─────────────────────────────────────────────────────────
 
 /**
  * Navigates to the given job URL and waits for the page to settle.

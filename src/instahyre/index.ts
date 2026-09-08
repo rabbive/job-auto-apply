@@ -36,7 +36,6 @@ async function screenshot(page: Awaited<ReturnType<typeof getActivePage>>, label
   return file;
 }
 
-// ─── Stats ────────────────────────────────────────────────────────────────────
 
 interface Stats {
   applied:                  number;
@@ -56,7 +55,6 @@ function printSummary(stats: Stats): void {
   log.divider();
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   log.banner();
@@ -83,7 +81,6 @@ async function main(): Promise<void> {
 
   let pageNum = 1;
 
-  // ── Page-by-page loop ───────────────────────────────────────────────────
   while (true) {
     const count = await getCardCount(page);
 
@@ -94,7 +91,6 @@ async function main(): Promise<void> {
 
     log.raw(`\nPage ${pageNum} — ${count} job(s)\n`);
 
-    // ── Card-by-card loop ─────────────────────────────────────────────────
     let offset = 0;
     let processed = 0;
     let newJobsOnThisPage = 0;
@@ -203,7 +199,6 @@ async function main(): Promise<void> {
       }
     }
 
-    // ── Next page ─────────────────────────────────────────────────────────
     // If we processed an entire page with zero new applications, stop.
     // This prevents looping infinitely through pages of already-seen jobs.
     if (newJobsOnThisPage === 0) {

@@ -5,9 +5,7 @@
  * stable attributes over fragile CSS class names.
  */
 export const SELECTORS = {
-  // ──────────────────────────────────────────────────────────────────────────
   // Listing / search-results page
-  // ──────────────────────────────────────────────────────────────────────────
 
   /**
    * Links to individual job detail pages.
@@ -37,9 +35,7 @@ export const SELECTORS = {
     'button:has-text("View more")',
   ].join(', '),
 
-  // ──────────────────────────────────────────────────────────────────────────
   // Job detail page
-  // ──────────────────────────────────────────────────────────────────────────
 
   /** The primary "Apply" or "Easy Apply" action button. */
   applyButton: [
@@ -68,9 +64,7 @@ export const SELECTORS = {
     '[data-testid="applied-badge"]',
   ].join(', '),
 
-  // ──────────────────────────────────────────────────────────────────────────
   // Application modal / dialog
-  // ──────────────────────────────────────────────────────────────────────────
 
   /**
    * The application modal / overlay container.
@@ -124,6 +118,16 @@ export const SELECTORS = {
     'input[required]:not([type="file"]):not([type="hidden"])',
     'textarea[required]',
     'select[required]',
+  ].join(', '),
+
+  /**
+   * Wellfound account-level rate limit shown inside the application modal.
+   * "Sorry, you've reached the maximum number of active applications."
+   */
+  applicationLimitError: [
+    ':has-text("maximum number of active applications")',
+    ':has-text("reached the maximum")',
+    ':has-text("too many active applications")',
   ].join(', '),
 
   /**

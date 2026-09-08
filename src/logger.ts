@@ -12,7 +12,6 @@ const RED    = '\x1b[31m';
 const CYAN   = '\x1b[36m';
 const GRAY   = '\x1b[90m';
 
-// ─── Public API ──────────────────────────────────────────────────────────────
 
 export function banner(): void {
   console.log();

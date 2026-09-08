@@ -19,7 +19,7 @@ const PROFILE_DIR = path.join(os.homedir(), '.wellfound-automation', 'browser-pr
  * Set BROWSER_PATH in your shell or .env to use a custom path:
  *   BROWSER_PATH="/path/to/browser" pnpm start
  */
-function getBrowserPath(): string {
+function getBrowserPath(): string | undefined {
   if (process.env.BROWSER_PATH) return process.env.BROWSER_PATH;
 
   const candidates: Record<string, string[]> = {
@@ -61,8 +61,7 @@ function getBrowserPath(): string {
     if (fs.existsSync(p)) return p;
   }
 
-  // Nothing found — Playwright will surface a clear error with the path.
-  return candidates[process.platform]?.[0] ?? 'google-chrome';
+  return undefined;
 }
 
 const BROWSER_PATH = getBrowserPath();
@@ -73,10 +72,10 @@ const BROWSER_PATH = getBrowserPath();
  */
 export async function launchBrowser(): Promise<BrowserContext> {
   log.step(`Using browser profile: ${PROFILE_DIR}`);
-  log.step(`Using browser: ${BROWSER_PATH}`);
+  log.step(BROWSER_PATH ? `Using browser: ${BROWSER_PATH}` : 'Using Playwright Chromium');
 
   const context = await chromium.launchPersistentContext(PROFILE_DIR, {
-    executablePath: BROWSER_PATH,
+    ...(BROWSER_PATH ? { executablePath: BROWSER_PATH } : {}),
     headless: false,
     viewport:  { width: 1440, height: 900 },
     slowMo: 80,

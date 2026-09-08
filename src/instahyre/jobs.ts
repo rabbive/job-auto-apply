@@ -2,7 +2,6 @@ import { Page, Locator } from 'playwright';
 import { IH } from './selectors.js';
 import * as log from '../logger.js';
 
-// ─── Card collection ──────────────────────────────────────────────────────────
 
 /**
  * Returns the count of "View »" buttons on the current page.
@@ -82,7 +81,6 @@ export async function goToNextPage(page: Page, currentPage: number): Promise<boo
   return false;
 }
 
-// ─── Modal operations ─────────────────────────────────────────────────────────
 
 /**
  * Clicks the nth "View »" button and waits for the AngularJS modal to open.
@@ -147,7 +145,6 @@ export async function closeModal(page: Page): Promise<void> {
   }
 }
 
-// ─── Job identification ───────────────────────────────────────────────────────
 
 /**
  * Reads a unique identifier from the LISTING CARD text (before opening the
@@ -203,7 +200,6 @@ export async function getJobMetaFromModal(
   }
 }
 
-// ─── Apply-flow checks ───────────────────────────────────────────────────────
 
 export async function isAlreadyApplied(page: Page): Promise<boolean> {
   const container = page.locator(IH.modalContainer).first();

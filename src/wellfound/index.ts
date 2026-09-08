@@ -15,6 +15,7 @@ import {
   isExternalApplication,
   hasCaptcha,
   hasMandatoryAdditionalFields,
+  hasApplicationLimitError,
   submitApplication,
   verifyApplication,
   takeDebugScreenshot,
@@ -23,7 +24,6 @@ import {
 } from './application.js';
 import * as log from '../logger.js';
 
-// ─── CLI helpers ─────────────────────────────────────────────────────────────
 
 function waitForEnter(prompt: string): Promise<void> {
   return new Promise((resolve) => {
@@ -38,7 +38,6 @@ function waitForEnter(prompt: string): Promise<void> {
   });
 }
 
-// ─── Per-job processor ────────────────────────────────────────────────────────
 
 async function processJob(
   context: Awaited<ReturnType<typeof launchBrowser>>,
@@ -72,13 +71,11 @@ async function processJob(
   const meta = await getJobMeta(page);
   log.info(`${meta.company} — ${meta.role}`);
 
-  // ── Already applied? ─────────────────────────────────────────────────────
   if (await isAlreadyApplied(page)) {
     log.skip('Already applied');
     return 'already_applied';
   }
 
-  // ── Find Apply button ────────────────────────────────────────────────────
   log.step('Looking for Apply button');
   const applyBtn = await findApplyButton(page);
 
@@ -88,7 +85,6 @@ async function processJob(
   }
   log.step('Apply button found');
 
-  // ── Open application ─────────────────────────────────────────────────────
   log.step('Opening application');
   const modal = await openApplication(page, context, applyBtn);
 
@@ -99,7 +95,6 @@ async function processJob(
   }
   log.step('Application form detected');
 
-  // ── CAPTCHA check ────────────────────────────────────────────────────────
   if (await hasCaptcha(modal)) {
     const screenshot = await takeDebugScreenshot(page, 'captcha');
     log.error(`CAPTCHA detected — skipping. Screenshot: ${screenshot}`);
@@ -107,14 +102,12 @@ async function processJob(
     return 'skipped_captcha';
   }
 
-  // ── External indicator inside the modal ──────────────────────────────────
   if (await isExternalApplication(modal)) {
     log.skip('External application (modal contains external link)');
     await dismissModal(page, modal);
     return 'skipped_external';
   }
 
-  // ── Mandatory additional fields ──────────────────────────────────────────
   if (await hasMandatoryAdditionalFields(modal)) {
     log.skip('Mandatory question / field detected');
     await dismissModal(page, modal);
@@ -122,19 +115,28 @@ async function processJob(
   }
   log.step('No mandatory additional fields');
 
-  // ── Submit ────────────────────────────────────────────────────────────────
+  if (await hasApplicationLimitError(modal)) {
+    log.error('Wellfound limit reached: too many active applications. Stopping run.');
+    await dismissModal(page, modal);
+    return 'skipped_rate_limited';
+  }
+
   log.step('Submitting application');
   const submitted = await submitApplication(page, modal);
 
   if (!submitted) {
+    // Check again after clicking — limit error may appear post-click.
+    if (await hasApplicationLimitError(modal)) {
+      log.error('Wellfound limit reached: too many active applications. Stopping run.');
+      await dismissModal(page, modal);
+      return 'skipped_rate_limited';
+    }
     const screenshot = await takeDebugScreenshot(page, 'submit_failed');
     log.error(`Submission failed or unexpected form state. Screenshot: ${screenshot}`);
-    // Try to recover.
     await dismissModal(page, modal).catch(() => undefined);
     return 'skipped_error';
   }
 
-  // ── Verify ────────────────────────────────────────────────────────────────
   const verified = await verifyApplication(page);
   if (verified) {
     log.success('Applied');
@@ -147,36 +149,35 @@ async function processJob(
   return 'applied';
 }
 
-// ─── Summary ──────────────────────────────────────────────────────────────────
 
 interface Stats {
-  applied:                 number;
-  already_applied:         number;
+  applied:                  number;
+  already_applied:          number;
   skipped_mandatory_fields: number;
-  skipped_external:        number;
-  skipped_captcha:         number;
-  skipped_no_apply_button: number;
-  skipped_error:           number;
+  skipped_external:         number;
+  skipped_captcha:          number;
+  skipped_no_apply_button:  number;
+  skipped_rate_limited:     number;
+  skipped_error:            number;
 }
 
 function printSummary(stats: Stats): void {
   log.sectionHeader('Finished');
-  log.summaryLine('Applied',                    stats.applied,                 '\x1b[32m');
-  log.summaryLine('Already applied',            stats.already_applied,         '\x1b[90m');
-  log.summaryLine('Skipped — mandatory fields', stats.skipped_mandatory_fields,'\x1b[33m');
-  log.summaryLine('Skipped — external app',     stats.skipped_external,        '\x1b[33m');
-  log.summaryLine('Skipped — CAPTCHA',          stats.skipped_captcha,         '\x1b[31m');
-  log.summaryLine('Skipped — no Apply button',  stats.skipped_no_apply_button, '\x1b[90m');
-  log.summaryLine('Skipped — error',            stats.skipped_error,           '\x1b[31m');
+  log.summaryLine('Applied',                    stats.applied,                  '\x1b[32m');
+  log.summaryLine('Already applied',            stats.already_applied,          '\x1b[90m');
+  log.summaryLine('Skipped — mandatory fields', stats.skipped_mandatory_fields, '\x1b[33m');
+  log.summaryLine('Skipped — external app',     stats.skipped_external,         '\x1b[33m');
+  log.summaryLine('Skipped — CAPTCHA',          stats.skipped_captcha,          '\x1b[31m');
+  log.summaryLine('Skipped — no Apply button',  stats.skipped_no_apply_button,  '\x1b[90m');
+  log.summaryLine('Skipped — rate limited',     stats.skipped_rate_limited,     '\x1b[31m');
+  log.summaryLine('Skipped — error',            stats.skipped_error,            '\x1b[31m');
   log.divider();
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   log.banner();
 
-  // ── Launch browser ───────────────────────────────────────────────────────
   log.raw('\n1. Launching browser…');
   const context = await launchBrowser();
   const page    = await getActivePage(context);
@@ -194,7 +195,6 @@ async function main(): Promise<void> {
 
   await waitForEnter('   Press ENTER when you are on the filtered results page and ready to start…');
 
-  // ── Collect job listings ─────────────────────────────────────────────────
   const jobUrls = await getJobListings(page);
 
   if (jobUrls.length === 0) {
@@ -214,10 +214,10 @@ async function main(): Promise<void> {
     skipped_external:         0,
     skipped_captcha:          0,
     skipped_no_apply_button:  0,
+    skipped_rate_limited:     0,
     skipped_error:            0,
   };
 
-  // ── Process each job ─────────────────────────────────────────────────────
   for (let i = 0; i < jobUrls.length; i++) {
     const jobUrl = jobUrls[i];
     try {
@@ -242,6 +242,9 @@ async function main(): Promise<void> {
 
       stats[result]++;
 
+      // Stop the entire run if Wellfound's application limit was hit.
+      if (result === 'skipped_rate_limited') break;
+
       // Pause briefly between jobs so the site isn't hammered.
       await new Promise((r) => setTimeout(r, 1500));
 
@@ -252,7 +255,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── Summary ───────────────────────────────────────────────────────────────
   printSummary(stats);
 
   await closeBrowser(context);

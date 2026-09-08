@@ -14,7 +14,7 @@ Automates one-click job applications on **Wellfound** and **Instahyre** using Pl
 
 - Node.js ≥ 18
 - pnpm
-- Brave, Chrome, or Chromium (auto-detected)
+- Brave, Chrome, or Chromium (optional — auto-detected if installed)
 
 ## Setup
 
@@ -47,7 +47,7 @@ Your browser session is stored in `~/.wellfound-automation/browser-profile/` and
 
 ## Browser
 
-Auto-detects in order: **Brave → Chrome → Chromium**. Works on macOS, Linux, and Windows.
+Auto-detects in order: **Brave → Chrome → Chromium**, then falls back to Playwright's Chromium. Works on macOS, Linux, and Windows.
 
 To use a custom browser path, set `BROWSER_PATH` in your `.env`:
 ```

@@ -58,9 +58,9 @@ test('rejects search URLs and accepts native Easy Apply only', async () => {
 
 test('rejects external and Indeed buttons', async () => {
   const html = `
-    <button>Apply on company site</button>
-    <button>Apply on Indeed</button>
-    <button>Apply on employer site</button>
+    <button data-test="easy-apply-button">Apply on company site</button>
+    <button data-test="easy-apply-button">Apply on Indeed</button>
+    <button data-test="easy-apply-button">Apply on employer site</button>
   `;
   const { browser, page } = await localPage(html);
   try {

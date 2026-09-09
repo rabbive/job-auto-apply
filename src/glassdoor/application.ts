@@ -1,7 +1,11 @@
+import { mkdir } from 'node:fs/promises';
 import path from 'path';
 import { Page, Locator, BrowserContext } from 'playwright';
 import { GD, GLASSDOOR_DOMAIN_RE } from './selectors.js';
 import * as log from '../logger.js';
+import { hasMandatoryAdditionalFields } from '../wellfound/application.js';
+
+export { hasMandatoryAdditionalFields };
 
 const SCREENSHOTS_DIR = path.resolve('screenshots');
 
@@ -66,7 +70,8 @@ export async function isExternalApplication(modal: Locator): Promise<boolean> {
     const text = el.innerText.toLowerCase();
     return text.includes('continue to company site') ||
            text.includes('apply on employer site') ||
-           text.includes('apply on company site');
+           text.includes('apply on company site') ||
+           text.includes('apply on indeed');
   });
   return externalText;
 }
@@ -89,66 +94,6 @@ export async function hasGlassdoorRateLimit(modal: Locator): Promise<boolean> {
            text.includes('try again later');
   });
   return rateLimitText;
-}
-
-/**
- * Reused from wellfound — detects mandatory unfilled fields.
- */
-export async function hasMandatoryAdditionalFields(modal: Locator): Promise<boolean> {
-  return modal.evaluate((el) => {
-    const SKIP_TYPES = new Set(['file', 'hidden', 'submit', 'button', 'reset', 'image', 'checkbox', 'radio']);
-
-    const fields = Array.from(
-      el.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
-        'input, textarea, select',
-      ),
-    );
-
-    const requiredMessage =
-      /(?:this (?:question|field) is required|requires? that you .* to apply)/i;
-
-    for (const field of fields) {
-      if (field instanceof HTMLInputElement && SKIP_TYPES.has(field.type)) continue;
-
-      const labels = Array.from(el.querySelectorAll('label'));
-      const labelText = labels
-        .filter((label) => {
-          if (field.id && label.htmlFor === field.id) return true;
-          return field.closest('label') === label || field.parentElement?.querySelector('label') === label;
-        })
-        .map((label) => label.textContent?.trim() ?? '')
-        .join(' ');
-
-      let hasRequiredMarker = /\*\s*$/.test(labelText);
-      let hasRequiredMessage = false;
-      let ancestor = field.parentElement;
-      for (let depth = 0; ancestor && depth < 4; depth++, ancestor = ancestor.parentElement) {
-        const precedingText = ancestor.previousElementSibling?.textContent?.trim() ?? '';
-        if (/\*\s*$/.test(precedingText)) hasRequiredMarker = true;
-        if (requiredMessage.test(ancestor.innerText)) {
-          hasRequiredMessage = true;
-          break;
-        }
-      }
-
-      const isRequired =
-        field.required ||
-        field.getAttribute('aria-required') === 'true' ||
-        hasRequiredMarker ||
-        hasRequiredMessage;
-
-      if (!isRequired) continue;
-
-      const value =
-        field instanceof HTMLSelectElement
-          ? field.value
-          : field.value?.trim() ?? '';
-
-      if (!value) return true;
-    }
-
-    return false;
-  });
 }
 
 /**
@@ -268,6 +213,7 @@ export async function takeDebugScreenshot(
   const safe = label.replace(/[^a-z0-9-_]/gi, '_').slice(0, 60);
   const file = path.join(SCREENSHOTS_DIR, `${ts}_${safe}.png`);
 
+  await mkdir(SCREENSHOTS_DIR, { recursive: true }).catch(() => undefined);
   await page.screenshot({ path: file, fullPage: false }).catch(() => undefined);
   return file;
 }

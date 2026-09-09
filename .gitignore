@@ -4,3 +4,4 @@ dist/
 .env
 screenshots/
 ~/.wellfound-automation/
+.worktrees/

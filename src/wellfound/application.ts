@@ -151,12 +151,38 @@ export async function hasMandatoryAdditionalFields(modal: Locator): Promise<bool
       ),
     );
 
+    const requiredMessage =
+      /(?:this (?:question|field) is required|requires? that you .* to apply)/i;
+
     for (const field of fields) {
       if (field instanceof HTMLInputElement && SKIP_TYPES.has(field.type)) continue;
 
+      const labels = Array.from(el.querySelectorAll('label'));
+      const labelText = labels
+        .filter((label) => {
+          if (field.id && label.htmlFor === field.id) return true;
+          return field.closest('label') === label || field.parentElement?.querySelector('label') === label;
+        })
+        .map((label) => label.textContent?.trim() ?? '')
+        .join(' ');
+
+      let hasRequiredMarker = /\*\s*$/.test(labelText);
+      let hasRequiredMessage = false;
+      let ancestor = field.parentElement;
+      for (let depth = 0; ancestor && depth < 4; depth++, ancestor = ancestor.parentElement) {
+        const precedingText = ancestor.previousElementSibling?.textContent?.trim() ?? '';
+        if (/\*\s*$/.test(precedingText)) hasRequiredMarker = true;
+        if (requiredMessage.test(ancestor.innerText)) {
+          hasRequiredMessage = true;
+          break;
+        }
+      }
+
       const isRequired =
         field.required ||
-        field.getAttribute('aria-required') === 'true';
+        field.getAttribute('aria-required') === 'true' ||
+        hasRequiredMarker ||
+        hasRequiredMessage;
 
       if (!isRequired) continue;
 

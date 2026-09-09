@@ -67,7 +67,7 @@ export async function openApplication(
  */
 export async function isExternalApplication(modal: Locator): Promise<boolean> {
   const externalText = await modal.evaluate((el) => {
-    const text = el.innerText.toLowerCase();
+    const text = (el.textContent ?? '').toLowerCase();
     return text.includes('continue to company site') ||
            text.includes('apply on employer site') ||
            text.includes('apply on company site') ||
@@ -89,7 +89,7 @@ export async function hasCaptcha(modal: Locator): Promise<boolean> {
  */
 export async function hasGlassdoorRateLimit(modal: Locator): Promise<boolean> {
   const rateLimitText = await modal.evaluate((el) => {
-    const text = el.innerText.toLowerCase();
+    const text = (el.textContent ?? '').toLowerCase();
     return text.includes('too many applications') ||
            text.includes('try again later');
   });

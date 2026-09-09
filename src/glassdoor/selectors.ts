@@ -2,8 +2,8 @@
  * Glassdoor India DOM selectors.
  */
 export const GD = {
-  /** Job listing card container. */
-  jobCard: 'li[data-jobid]',
+  /** Job listing card container (data-jobid or class prefix fallback). */
+  jobCard: 'li[data-jobid], li[class*="JobCard"]',
 
   /** Job title link within a card. */
   jobTitle: '[data-test="job-title"]',
@@ -38,10 +38,10 @@ export const GD = {
     '[data-sitekey]',
     'iframe[src*="challenges.cloudflare.com"]',
   ].join(', '),
-
-  /** External application dialog. */
-  externalDialog: ':has-text("Apply on employer site")',
 } as const;
 
 export const GLASSDOOR_DOMAIN_RE = /glassdoor\.(com|co\.in)/;
 export const GLASSDOOR_JOB_PATH_RE = /\/job-listing\//;
+
+/** Default Glassdoor India jobs search URL (CLI integration in Task 3). */
+export const GLASSDOOR_INDIA_JOBS_URL = 'https://www.glassdoor.co.in/Job/jobs.htm';

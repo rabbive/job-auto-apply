@@ -42,14 +42,13 @@ export async function extractJobListings(page: Page): Promise<GlassdoorJob[]> {
 
   for (const card of cards) {
     try {
-      const jobId = await card.getAttribute('data-jobid');
       const titleLink = card.locator(GD.jobTitle).first();
       const href = await titleLink.getAttribute('href');
       const title = await titleLink.innerText();
       const company = await card.locator(GD.company).first().innerText();
       const location = await card.locator(GD.location).first().innerText();
 
-      if (!jobId || !href || !title || !company || !location) continue;
+      if (!href || !title || !company || !location) continue;
 
       const url = normalizeJobUrl(href, page.url());
       if (!url) continue;
@@ -57,6 +56,9 @@ export async function extractJobListings(page: Page): Promise<GlassdoorJob[]> {
       // Deduplicate by URL.
       if (seen.has(url)) continue;
       seen.add(url);
+
+      // Extract jobId from data-jobid or derive from URL jl parameter.
+      const jobId = (await card.getAttribute('data-jobid')) || new URL(url).searchParams.get('jl') || url.split('/').pop() || 'unknown';
 
       jobs.push({ jobId, url, title, company, location });
     } catch {
@@ -123,11 +125,20 @@ export async function isAlreadyApplied(page: Page): Promise<boolean> {
 
 /**
  * Returns the native Easy Apply button if visible and enabled, or null.
+ * Rejects external/employer-site/Indeed buttons.
  */
 export async function findEasyApplyButton(page: Page): Promise<Locator | null> {
   const btn = page.locator(GD.easyApplyButton).first();
   if (!(await btn.isVisible().catch(() => false))) return null;
   if (await btn.isDisabled().catch(() => false)) return null;
+
+  // Reject external application buttons.
+  const text = await btn.innerText().catch(() => '');
+  const rejectPatterns = ['employer site', 'company site', 'Indeed', 'external'];
+  if (rejectPatterns.some((pattern) => text.toLowerCase().includes(pattern.toLowerCase()))) {
+    return null;
+  }
+
   return btn;
 }
 
@@ -140,7 +151,16 @@ export async function getJobMeta(page: Page): Promise<{ company: string; role: s
     const heading = await page.locator('h1, h2').first().innerText().catch(() => '');
 
     const role = heading || title || 'Unknown Role';
-    const company = title.split(' - ')[0] || 'Unknown Company';
+
+    // Parse company from title (handles "Company - Role", "Role at Company", etc.).
+    let company = 'Unknown Company';
+    if (title.includes(' - ')) {
+      company = title.split(' - ')[0];
+    } else if (title.toLowerCase().includes(' at ')) {
+      company = title.split(/ at /i)[1] || title;
+    } else {
+      company = title;
+    }
 
     return { role, company };
   } catch {

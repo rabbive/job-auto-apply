@@ -8,10 +8,9 @@
 export const IH = {
 
   /**
-   * The green "View »" button on each job card. Must be specific to avoid
-   * matching the card's company link which also contains "View" text.
+   * The green "View job »" button on each job card.
    */
-  viewButton: 'button:has-text("View »")',
+  viewButton: 'button.btn-interested, button:has-text("View job »"), button:has-text("View »")',
 
   /**
    * "Next »" pagination element at the bottom.

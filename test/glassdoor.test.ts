@@ -9,6 +9,12 @@ import {
   isAlreadyApplied,
   getJobMeta,
 } from '../src/glassdoor/jobs.js';
+import {
+  hasCaptcha,
+  hasGlassdoorRateLimit,
+  isExternalApplication,
+  submitApplication,
+} from '../src/glassdoor/application.js';
 
 async function localPage(html: string): Promise<{ browser: Browser; page: Page }> {
   const browser = await chromium.launch({ headless: true });
@@ -108,6 +114,123 @@ test('extracts job meta from title and heading', async () => {
     const meta = await getJobMeta(page);
     assert.equal(meta.role, 'Senior Backend Engineer');
     assert.equal(meta.company, 'TechCorp');
+  } finally {
+    await browser.close();
+  }
+});
+
+test('classifies employer-site copy as external', async () => {
+  const { browser, page } = await localPage('<div role="dialog"><p>Continue to company site</p></div>');
+  try {
+    assert.equal(await isExternalApplication(page.locator('[role="dialog"]')), true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('detects CAPTCHA and rate-limit copy', async () => {
+  const { browser, page } = await localPage('<div role="dialog"><iframe src="https://www.google.com/recaptcha/api2/anchor"></iframe><p>Too many applications. Try again later.</p></div>');
+  try {
+    const modal = page.locator('[role="dialog"]');
+    assert.equal(await hasCaptcha(modal), true);
+    assert.equal(await hasGlassdoorRateLimit(modal), true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('two-step submit application flow', async () => {
+  const html = `
+    <div role="dialog" id="modal">
+      <button id="continue">Continue</button>
+    </div>
+  `;
+  const { browser, page } = await localPage(html);
+  try {
+    await page.evaluate(() => {
+      const continueBtn = document.getElementById('continue');
+      if (continueBtn) {
+        continueBtn.addEventListener('click', () => {
+          continueBtn.remove();
+          const submitBtn = document.createElement('button');
+          submitBtn.id = 'submit';
+          submitBtn.textContent = 'Submit application';
+          const modal = document.getElementById('modal');
+          modal?.appendChild(submitBtn);
+          submitBtn.addEventListener('click', () => {
+            const success = document.createElement('div');
+            success.id = 'success-marker';
+            success.textContent = 'Application submitted';
+            modal?.appendChild(success);
+          });
+        });
+      }
+    });
+    const modal = page.locator('[role="dialog"]');
+    const result = await submitApplication(page, modal);
+    assert.equal(result, true);
+    const successMarker = await page.locator('#success-marker').isVisible();
+    assert.equal(successMarker, true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('classifies employer-site copy as external', async () => {
+  const { browser, page } = await localPage('<div role="dialog"><p>Continue to company site</p></div>');
+  try {
+    assert.equal(await isExternalApplication(page.locator('[role="dialog"]')), true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('detects CAPTCHA and rate-limit copy', async () => {
+  const { browser, page } = await localPage('<div role="dialog"><iframe src="https://www.google.com/recaptcha/api2/anchor"></iframe><p>Too many applications. Try again later.</p></div>');
+  try {
+    const modal = page.locator('[role="dialog"]');
+    assert.equal(await hasCaptcha(modal), true);
+    assert.equal(await hasGlassdoorRateLimit(modal), true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('two-step fixture with Continue and Submit', async () => {
+  const html = `
+    <div role="dialog">
+      <button id="continue-btn">Continue</button>
+    </div>
+  `;
+  const { browser, page } = await localPage(html);
+  try {
+    const modal = page.locator('[role="dialog"]');
+
+    // Simulate two-step flow: Continue button → Submit button
+    await page.evaluate(() => {
+      const continueBtn = document.getElementById('continue-btn');
+      if (continueBtn) {
+        continueBtn.addEventListener('click', () => {
+          const dialog = document.querySelector('[role="dialog"]');
+          if (dialog) {
+            dialog.innerHTML = `
+              <button id="submit-btn">Submit application</button>
+              <div id="success-marker" style="display:none;">Application submitted</div>
+            `;
+            const submitBtn = document.getElementById('submit-btn');
+            if (submitBtn) {
+              submitBtn.addEventListener('click', () => {
+                const marker = document.getElementById('success-marker');
+                if (marker) marker.style.display = 'block';
+              });
+            }
+          }
+        });
+      }
+    });
+
+    const result = await submitApplication(page, modal);
+    assert.equal(result, true);
   } finally {
     await browser.close();
   }

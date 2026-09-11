@@ -1,6 +1,6 @@
 # job-auto-apply
 
-Automates one-click job applications on **Wellfound** and **Instahyre** using Playwright. Runs locally in your own browser with your own session — no AI, no backend, completely free.
+Automates one-click job applications on **Wellfound**, **Instahyre**, and **Glassdoor India** using Playwright. Runs locally in your own browser with your own session — no AI, no backend, completely free.
 
 ## What it does
 
@@ -42,6 +42,20 @@ pnpm start:instahyre
 2. Update `INSTAHYRE_JOBS_URL` in `src/instahyre/selectors.ts` with your own filter URL
 3. Press **ENTER** when results are showing
 4. Watch it go
+
+**Glassdoor India:**
+```bash
+pnpm start:glassdoor
+```
+1. Browser opens at `https://www.glassdoor.co.in/Job/easy-apply-jobs-SRCH_KO0%2C10.htm` unless you already have a Glassdoor page open
+2. Log in and set your filters in the visible browser
+3. Press **ENTER** when the results are ready
+4. The run submits only native Glassdoor Easy Apply flows. It skips Indeed, employer-site, ATS, external, CAPTCHA, and required-question flows
+
+Glassdoor starts with one page. Override the initial URL or page limit in your environment:
+```bash
+GLASSDOOR_JOBS_URL='https://www.glassdoor.co.in/Job/easy-apply-jobs-SRCH_KO0%2C10.htm' GLASSDOOR_MAX_PAGES=3 pnpm start:glassdoor
+```
 
 Your browser session is stored in `~/.wellfound-automation/browser-profile/` and reused on every run — no need to log in again after the first time.
 

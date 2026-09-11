@@ -3,6 +3,7 @@ import { access, rmdir } from 'node:fs/promises';
 import test from 'node:test';
 import path from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright';
+import { parseMaxPages } from '../src/glassdoor/index.js';
 import {
   extractJobListings,
   findEasyApplyButton,
@@ -19,6 +20,13 @@ import {
   submitApplication,
   takeDebugScreenshot,
 } from '../src/glassdoor/application.js';
+
+test('parses the Glassdoor page limit', () => {
+  assert.equal(parseMaxPages(undefined), 1);
+  assert.equal(parseMaxPages('3'), 3);
+  assert.throws(() => parseMaxPages('0'));
+  assert.throws(() => parseMaxPages('nope'));
+});
 
 async function localPage(html: string): Promise<{ browser: Browser; page: Page }> {
   const browser = await chromium.launch({ headless: true });

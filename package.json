@@ -6,6 +6,7 @@
   "scripts": {
     "start:wellfound": "tsx src/wellfound/index.ts",
     "start:instahyre": "tsx src/instahyre/index.ts",
+    "start:glassdoor": "tsx src/glassdoor/index.ts",
     "build": "tsc",
     "start:built": "node dist/index.js"
   },

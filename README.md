@@ -72,5 +72,6 @@ BROWSER_PATH=/path/to/browser
 
 - Wellfound: `src/wellfound/selectors.ts`
 - Instahyre: `src/instahyre/selectors.ts`
+- Glassdoor: `src/glassdoor/selectors.ts`
 
 If a site updates its UI, that's the only file to touch.

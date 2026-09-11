@@ -1,6 +1,6 @@
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import type { Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
 import 'dotenv/config';
 
 import { closeBrowser, getActivePage, launchBrowser } from '../browser.js';
@@ -23,11 +23,8 @@ import {
   isCloudflareBlocked,
   openJob,
 } from './jobs.js';
-import { GLASSDOOR_DOMAIN_RE } from './selectors.js';
+import { GLASSDOOR_DOMAIN_RE, GLASSDOOR_INDIA_JOBS_URL } from './selectors.js';
 import type { ApplicationResult } from '../wellfound/application.js';
-
-const DEFAULT_GLASSDOOR_JOBS_URL =
-  'https://www.glassdoor.co.in/Job/easy-apply-jobs-SRCH_KO0%2C10.htm';
 
 export function parseMaxPages(value: string | undefined): number {
   if (value === undefined) return 1;
@@ -41,6 +38,13 @@ export function parseMaxPages(value: string | undefined): number {
 }
 
 type JobResult = ApplicationResult | 'blocked';
+type ApplicationFailureResult = Extract<
+  JobResult,
+  | 'skipped_mandatory_fields'
+  | 'skipped_external'
+  | 'skipped_captcha'
+  | 'skipped_rate_limited'
+>;
 
 interface Stats {
   applied: number;
@@ -109,6 +113,36 @@ async function stopIfBlocked(page: Page): Promise<boolean> {
   return true;
 }
 
+export async function getApplicationFailureResult(
+  modal: Locator,
+): Promise<ApplicationFailureResult | null> {
+  if (await hasGlassdoorRateLimit(modal)) return 'skipped_rate_limited';
+  if (await hasCaptcha(modal)) return 'skipped_captcha';
+  if (await isExternalApplication(modal)) return 'skipped_external';
+  if (await hasMandatoryAdditionalFields(modal)) return 'skipped_mandatory_fields';
+  return null;
+}
+
+async function handleApplicationFailure(
+  page: Page,
+  modal: Locator,
+  result: ApplicationFailureResult,
+): Promise<ApplicationFailureResult> {
+  if (result === 'skipped_rate_limited') {
+    log.error('Glassdoor application limit reached. Stopping run.');
+  } else if (result === 'skipped_captcha') {
+    const screenshot = await takeDebugScreenshot(page, 'captcha');
+    log.error(`CAPTCHA detected. Screenshot: ${screenshot}`);
+  } else if (result === 'skipped_external') {
+    log.skip('External application');
+  } else {
+    log.skip('Mandatory question or field detected');
+  }
+
+  await dismissModal(page, modal);
+  return result;
+}
+
 async function processJob(
   context: Awaited<ReturnType<typeof launchBrowser>>,
   jobUrl: string,
@@ -147,43 +181,27 @@ async function processJob(
     return 'skipped_no_apply_button';
   }
 
-  const modal = await openApplication(page, context, applyButton);
-  if (!modal) {
-    log.skip('External application or no application form');
-    return 'skipped_external';
-  }
-
-  if (await hasCaptcha(modal)) {
-    const screenshot = await takeDebugScreenshot(page, 'captcha');
-    log.error(`CAPTCHA detected. Screenshot: ${screenshot}`);
-    await dismissModal(page, modal);
-    return 'skipped_captcha';
-  }
-
-  if (await isExternalApplication(modal)) {
+  const application = await openApplication(page, context, applyButton);
+  if (application.kind === 'external') {
     log.skip('External application');
-    await dismissModal(page, modal);
     return 'skipped_external';
   }
-
-  if (await hasMandatoryAdditionalFields(modal)) {
-    log.skip('Mandatory question or field detected');
-    await dismissModal(page, modal);
-    return 'skipped_mandatory_fields';
+  if (application.kind === 'missing') {
+    log.skip('No application form detected');
+    return 'skipped_error';
   }
+  const { modal } = application;
 
-  if (await hasGlassdoorRateLimit(modal)) {
-    log.error('Glassdoor application limit reached. Stopping run.');
-    await dismissModal(page, modal);
-    return 'skipped_rate_limited';
+  const initialFailure = await getApplicationFailureResult(modal);
+  if (initialFailure) {
+    return handleApplicationFailure(page, modal, initialFailure);
   }
 
   const submitted = await submitApplication(page, modal);
   if (!submitted) {
-    if (await hasGlassdoorRateLimit(modal)) {
-      log.error('Glassdoor application limit reached. Stopping run.');
-      await dismissModal(page, modal);
-      return 'skipped_rate_limited';
+    const submissionFailure = await getApplicationFailureResult(modal);
+    if (submissionFailure) {
+      return handleApplicationFailure(page, modal, submissionFailure);
     }
 
     const screenshot = await takeDebugScreenshot(page, 'submit_failed');
@@ -199,7 +217,7 @@ async function processJob(
 
 async function main(): Promise<void> {
   const maxPages = parseMaxPages(process.env.GLASSDOOR_MAX_PAGES);
-  const jobsUrl = process.env.GLASSDOOR_JOBS_URL ?? DEFAULT_GLASSDOOR_JOBS_URL;
+  const jobsUrl = process.env.GLASSDOOR_JOBS_URL ?? GLASSDOOR_INDIA_JOBS_URL;
 
   log.banner();
   log.raw('  (Glassdoor India mode)\n');

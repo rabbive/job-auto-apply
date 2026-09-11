@@ -9,17 +9,21 @@ export { hasMandatoryAdditionalFields };
 
 const SCREENSHOTS_DIR = path.resolve('screenshots');
 
+export type OpenApplicationResult =
+  | { kind: 'modal'; modal: Locator }
+  | { kind: 'external' }
+  | { kind: 'missing' };
+
 /**
  * Clicks the Easy Apply button and detects what Glassdoor does next.
  *
- * Returns a Locator scoped to the application dialog, or `null` if
- * the flow is external or unrecognisable.
+ * Returns the application dialog or an explicit external/missing outcome.
  */
 export async function openApplication(
   page: Page,
   context: BrowserContext,
   applyButton: Locator,
-): Promise<Locator | null> {
+): Promise<OpenApplicationResult> {
   const urlBefore = page.url();
 
   // Register BEFORE clicking — a new tab may open immediately.
@@ -39,27 +43,27 @@ export async function openApplication(
     await (newTabPage as Page).close().catch(() => {});
 
     if (!GLASSDOOR_DOMAIN_RE.test(tabUrl)) {
-      return null; // External ATS in new tab → skip
+      return { kind: 'external' }; // External ATS in new tab → skip
     }
   }
 
   // 2. Current tab navigated?
   const urlAfter = page.url();
   if (urlAfter !== urlBefore) {
-    if (!GLASSDOOR_DOMAIN_RE.test(urlAfter)) return null; // External redirect
+    if (!GLASSDOOR_DOMAIN_RE.test(urlAfter)) return { kind: 'external' }; // External redirect
   }
 
   // 3. Dialog appeared?
   const dialog = page.locator('[role="dialog"]').first();
   if (await dialog.isVisible().catch(() => false)) {
     log.info('Detected Glassdoor application dialog');
-    return dialog;
+    return { kind: 'modal', modal: dialog };
   }
 
   // 4. Nothing detected
   const screenshotPath = await takeDebugScreenshot(page, 'apply_no_form_detected');
   log.info(`No application form detected. Screenshot saved: ${screenshotPath}`);
-  return null;
+  return { kind: 'missing' };
 }
 
 /**

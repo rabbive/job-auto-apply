@@ -3,7 +3,7 @@ import { access, rmdir } from 'node:fs/promises';
 import test from 'node:test';
 import path from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright';
-import { parseMaxPages } from '../src/glassdoor/index.js';
+import { getApplicationFailureResult, parseMaxPages } from '../src/glassdoor/index.js';
 import {
   extractJobListings,
   findEasyApplyButton,
@@ -17,6 +17,7 @@ import {
   hasGlassdoorRateLimit,
   hasMandatoryAdditionalFields,
   isExternalApplication,
+  openApplication,
   submitApplication,
   takeDebugScreenshot,
 } from '../src/glassdoor/application.js';
@@ -149,6 +150,20 @@ test('classifies Indeed dialog copy as external', async () => {
   }
 });
 
+test('returns a missing-form outcome when no dialog opens', async () => {
+  const { browser, page } = await localPage('<button id="apply">Easy Apply</button>');
+  try {
+    const outcome = await openApplication(
+      page,
+      page.context(),
+      page.locator('#apply'),
+    );
+    assert.deepEqual(outcome, { kind: 'missing' });
+  } finally {
+    await browser.close();
+  }
+});
+
 test('creates the screenshots directory before capturing a debug screenshot', async () => {
   const screenshotsDir = path.resolve('screenshots');
   const screenshotsDirExisted = await access(screenshotsDir).then(() => true).catch(() => false);
@@ -185,6 +200,45 @@ test('detects CAPTCHA and rate-limit copy', async () => {
     assert.equal(await hasGlassdoorRateLimit(modal), true);
   } finally {
     await browser.close();
+  }
+});
+
+test('classifies modal failures with rate limits first', async (t) => {
+  const cases = [
+    {
+      name: 'rate limit before mandatory fields',
+      html: '<div role="dialog"><p>Too many applications. Try again later.</p><textarea aria-required="true"></textarea></div>',
+      expected: 'skipped_rate_limited',
+    },
+    {
+      name: 'CAPTCHA',
+      html: '<div role="dialog"><iframe src="https://www.google.com/recaptcha/api2/anchor"></iframe></div>',
+      expected: 'skipped_captcha',
+    },
+    {
+      name: 'external application',
+      html: '<div role="dialog"><p>Continue to company site</p></div>',
+      expected: 'skipped_external',
+    },
+    {
+      name: 'mandatory fields',
+      html: '<div role="dialog"><textarea aria-required="true"></textarea></div>',
+      expected: 'skipped_mandatory_fields',
+    },
+  ] as const;
+
+  for (const { name, html, expected } of cases) {
+    await t.test(name, async () => {
+      const { browser, page } = await localPage(html);
+      try {
+        assert.equal(
+          await getApplicationFailureResult(page.locator('[role="dialog"]')),
+          expected,
+        );
+      } finally {
+        await browser.close();
+      }
+    });
   }
 });
 

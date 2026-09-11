@@ -43,5 +43,6 @@ export const GD = {
 export const GLASSDOOR_DOMAIN_RE = /glassdoor\.(com|co\.in)/;
 export const GLASSDOOR_JOB_PATH_RE = /\/job-listing\//;
 
-/** Default Glassdoor India jobs search URL (CLI integration in Task 3). */
-export const GLASSDOOR_INDIA_JOBS_URL = 'https://www.glassdoor.co.in/Job/jobs.htm';
+/** Default Glassdoor India Easy Apply jobs search URL. */
+export const GLASSDOOR_INDIA_JOBS_URL =
+  'https://www.glassdoor.co.in/Job/easy-apply-jobs-SRCH_KO0%2C10.htm';

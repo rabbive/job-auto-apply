@@ -23,7 +23,7 @@ import {
   isCloudflareBlocked,
   openJob,
 } from './jobs.js';
-import { GLASSDOOR_DOMAIN_RE, GLASSDOOR_INDIA_JOBS_URL } from './selectors.js';
+import { GLASSDOOR_INDIA_JOBS_URL, isTrustedGlassdoorUrl } from './selectors.js';
 import type { ApplicationResult } from '../wellfound/application.js';
 
 export function parseMaxPages(value: string | undefined): number {
@@ -227,7 +227,7 @@ async function main(): Promise<void> {
   try {
     const page = await getActivePage(context);
 
-    if (!GLASSDOOR_DOMAIN_RE.test(new URL(page.url()).hostname)) {
+    if (!isTrustedGlassdoorUrl(page.url())) {
       await page.goto(jobsUrl, { waitUntil: 'domcontentloaded' });
     }
 

@@ -74,4 +74,4 @@ BROWSER_PATH=/path/to/browser
 - Instahyre: `src/instahyre/selectors.ts`
 - Glassdoor: `src/glassdoor/selectors.ts`
 
-If a site updates its UI, that's the only file to touch.
+If a site updates its UI, start with its selector file; flow-specific guards may also need adjustment.

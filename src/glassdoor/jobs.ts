@@ -1,5 +1,5 @@
 import { Page, Locator } from 'playwright';
-import { GD, GLASSDOOR_DOMAIN_RE, GLASSDOOR_JOB_PATH_RE } from './selectors.js';
+import { GD, GLASSDOOR_JOB_PATH_RE, isTrustedGlassdoorUrl } from './selectors.js';
 import * as log from '../logger.js';
 
 export interface GlassdoorJob {
@@ -19,13 +19,15 @@ export function normalizeJobUrl(href: string, pageUrl: string): string | null {
     const url = new URL(href, pageUrl);
 
     // Reject non-Glassdoor hosts.
-    if (!GLASSDOOR_DOMAIN_RE.test(url.hostname)) return null;
+    if (!isTrustedGlassdoorUrl(url)) return null;
 
     // Reject non-job-listing paths (e.g., search URLs).
     if (!GLASSDOOR_JOB_PATH_RE.test(url.pathname)) return null;
 
-    // Preserve jl parameter and full URL.
-    return url.href;
+    const jobId = url.searchParams.get('jl');
+    if (!jobId) return null;
+
+    return `${url.origin}${url.pathname}?jl=${encodeURIComponent(jobId)}`;
   } catch {
     return null;
   }
@@ -43,7 +45,7 @@ export async function extractJobListings(page: Page): Promise<GlassdoorJob[]> {
   for (const card of cards) {
     try {
       const titleLink = card.locator(GD.jobTitle).first();
-      const href = await titleLink.getAttribute('href');
+      const href = await titleLink.evaluate((link) => (link as HTMLAnchorElement).href);
       const title = await titleLink.innerText();
       const company = await card.locator(GD.company).first().innerText();
       const location = await card.locator(GD.location).first().innerText();
@@ -89,7 +91,12 @@ export async function getJobListings(page: Page, maxPages: number): Promise<stri
     await page.goto(currentUrl.href);
     await page.waitForTimeout(3000);
 
+    if (await isCloudflareBlocked(page)) {
+      throw new Error('Glassdoor blocked during pagination');
+    }
+
     const jobs = await extractJobListings(page);
+    if (jobs.length === 0) break;
     jobs.forEach((job) => allUrls.add(job.url));
   }
 
@@ -109,10 +116,11 @@ export async function openJob(page: Page, jobUrl: string): Promise<string> {
  * Checks if the page is blocked by Cloudflare.
  */
 export async function isCloudflareBlocked(page: Page): Promise<boolean> {
-  const title = await page.title();
-  if (title.includes('Security') || title.includes('Cloudflare')) return true;
-  if (page.url().includes('__cf_chl_tk')) return true;
-  return false;
+  const title = (await page.title()).toLowerCase();
+  const url = new URL(page.url());
+  return title.includes('security') || title.includes('cloudflare') || title.includes('just a moment') ||
+    [...url.searchParams.keys()].some((key) => key.toLowerCase() === '__cf_chl_tk') ||
+    url.hostname.toLowerCase() === 'challenges.cloudflare.com';
 }
 
 /**
@@ -120,7 +128,12 @@ export async function isCloudflareBlocked(page: Page): Promise<boolean> {
  */
 export async function isAlreadyApplied(page: Page): Promise<boolean> {
   const main = page.locator('main, [role="main"]').first();
-  return main.locator(GD.alreadyApplied).first().isVisible().catch(() => false);
+  const candidates = main.locator(GD.alreadyApplied);
+  return candidates.evaluateAll((elements) => elements.some((element) => {
+    const text = (element.textContent ?? element.getAttribute('aria-label') ?? '').trim().toLowerCase();
+    const style = window.getComputedStyle(element);
+    return text === 'applied' && style.display !== 'none' && style.visibility !== 'hidden';
+  })).catch(() => false);
 }
 
 /**
@@ -128,18 +141,11 @@ export async function isAlreadyApplied(page: Page): Promise<boolean> {
  * Rejects external/employer-site/Indeed buttons.
  */
 export async function findEasyApplyButton(page: Page): Promise<Locator | null> {
-  const btn = page.locator(GD.easyApplyButton).first();
-  if (!(await btn.isVisible().catch(() => false))) return null;
-  if (await btn.isDisabled().catch(() => false)) return null;
-
-  // Reject external application buttons.
-  const text = await btn.innerText().catch(() => '');
-  const rejectPatterns = ['employer site', 'company site', 'Indeed', 'external'];
-  if (rejectPatterns.some((pattern) => text.toLowerCase().includes(pattern.toLowerCase()))) {
-    return null;
+  for (const btn of await page.locator(GD.easyApplyButton).all()) {
+    if (!(await btn.isVisible().catch(() => false)) || await btn.isDisabled().catch(() => true)) continue;
+    if ((await btn.innerText().catch(() => '')).trim().toLowerCase() === 'easy apply') return btn;
   }
-
-  return btn;
+  return null;
 }
 
 /**
@@ -149,16 +155,17 @@ export async function getJobMeta(page: Page): Promise<{ company: string; role: s
   try {
     const title = await page.title();
     const heading = await page.locator('h1, h2').first().innerText().catch(() => '');
+    const detailCompany = await page.locator(GD.company).first().innerText().catch(() => '');
 
     const role = heading || title || 'Unknown Role';
 
     // Parse company from title (handles "Company - Role", "Role at Company", etc.).
-    let company = 'Unknown Company';
-    if (title.includes(' - ')) {
+    let company = detailCompany || 'Unknown Company';
+    if (!detailCompany && title.includes(' - ')) {
       company = title.split(' - ')[0];
-    } else if (title.toLowerCase().includes(' at ')) {
+    } else if (!detailCompany && title.toLowerCase().includes(' at ')) {
       company = title.split(/ at /i)[1] || title;
-    } else {
+    } else if (!detailCompany) {
       company = title;
     }
 

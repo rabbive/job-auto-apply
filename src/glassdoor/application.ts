@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'path';
 import { Page, Locator, BrowserContext } from 'playwright';
-import { GD, GLASSDOOR_DOMAIN_RE } from './selectors.js';
+import { GD, isTrustedGlassdoorUrl } from './selectors.js';
 import * as log from '../logger.js';
 import { hasMandatoryAdditionalFields } from '../wellfound/application.js';
 
@@ -31,18 +31,20 @@ export async function openApplication(
   const tabHandler = (p: Page) => { newTabPage = p; };
   context.on('page', tabHandler);
 
-  await applyButton.click();
-
-  // Allow time for modal animation or new tab.
-  await page.waitForTimeout(2500);
-  context.off('page', tabHandler);
+  try {
+    await applyButton.click();
+    // Allow time for modal animation or new tab.
+    await page.waitForTimeout(2500);
+  } finally {
+    context.off('page', tabHandler);
+  }
 
   // 1. New tab opened?
   if (newTabPage) {
     const tabUrl = (newTabPage as Page).url();
     await (newTabPage as Page).close().catch(() => {});
 
-    if (!GLASSDOOR_DOMAIN_RE.test(tabUrl)) {
+    if (!isTrustedGlassdoorUrl(tabUrl)) {
       return { kind: 'external' }; // External ATS in new tab → skip
     }
   }
@@ -50,12 +52,13 @@ export async function openApplication(
   // 2. Current tab navigated?
   const urlAfter = page.url();
   if (urlAfter !== urlBefore) {
-    if (!GLASSDOOR_DOMAIN_RE.test(urlAfter)) return { kind: 'external' }; // External redirect
+    if (!isTrustedGlassdoorUrl(urlAfter)) return { kind: 'external' }; // External redirect
   }
 
   // 3. Dialog appeared?
-  const dialog = page.locator('[role="dialog"]').first();
+  const dialog = page.locator(GD.applicationDialog).first();
   if (await dialog.isVisible().catch(() => false)) {
+    if (await isExternalApplication(dialog)) return { kind: 'external' };
     log.info('Detected Glassdoor application dialog');
     return { kind: 'modal', modal: dialog };
   }
@@ -70,22 +73,35 @@ export async function openApplication(
  * Checks whether the dialog is routing to an external application.
  */
 export async function isExternalApplication(modal: Locator): Promise<boolean> {
-  const externalText = await modal.evaluate((el) => {
-    const text = (el.textContent ?? '').toLowerCase();
-    return text.includes('continue to company site') ||
-           text.includes('apply on employer site') ||
-           text.includes('apply on company site') ||
-           text.includes('apply on indeed');
-  });
-  return externalText;
+  const indicators = await modal.locator('a[href], button, [role="button"]').evaluateAll((elements) =>
+    elements.filter((element) => {
+      const style = window.getComputedStyle(element);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    }).map((element) => ({
+      href: element instanceof HTMLAnchorElement ? element.href : '',
+      text: (element.textContent ?? '').trim().toLowerCase(),
+    })),
+  ).catch(() => [] as Array<{ href: string; text: string }>);
+
+  return indicators.some(({ href, text }) =>
+    Boolean(href && !isTrustedGlassdoorUrl(href)) ||
+    /(?:continue to|apply on) (?:the )?(?:company|employer) site|apply on indeed|external application/.test(text),
+  );
 }
 
 export async function hasCaptcha(modal: Locator): Promise<boolean> {
-  return modal
-    .locator(GD.captcha)
-    .first()
-    .isVisible()
-    .catch(() => false);
+  return modal.evaluate((el) => {
+    for (const element of Array.from(el.querySelectorAll('iframe, .g-recaptcha, .h-captcha, [data-sitekey], [class*="turnstile"], [id*="captcha"]'))) {
+      const elementStyle = window.getComputedStyle(element);
+      if (elementStyle.display === 'none' || elementStyle.visibility === 'hidden') continue;
+      const frame = element as HTMLIFrameElement;
+      const hint = `${frame.src ?? ''} ${frame.title ?? ''} ${element.className ?? ''} ${element.id ?? ''}`.toLowerCase();
+      if (/captcha|recaptcha|hcaptcha|turnstile|challenge/.test(hint)) return true;
+    }
+    const style = window.getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden' &&
+      /(?:captcha|security challenge|verify you are human|checking your browser)/i.test(el.textContent ?? '');
+  }).catch(() => false);
 }
 
 /**
@@ -94,8 +110,7 @@ export async function hasCaptcha(modal: Locator): Promise<boolean> {
 export async function hasGlassdoorRateLimit(modal: Locator): Promise<boolean> {
   const rateLimitText = await modal.evaluate((el) => {
     const text = (el.textContent ?? '').toLowerCase();
-    return text.includes('too many applications') ||
-           text.includes('try again later');
+    return /\byou have reached your application limit\.?/i.test(text);
   });
   return rateLimitText;
 }
@@ -136,48 +151,24 @@ export async function submitApplication(
       return false;
     }
 
-    // Look for Continue/Next/Review buttons
-    const continueBtn = modal.locator('button').filter({
-      hasText: /continue|next|review/i,
-    }).first();
+    // Only exact in-form navigation labels can progress the application.
+    const continueBtn = await findExactButton(modal, ['continue', 'next', 'review', 'review application']);
 
-    if (await continueBtn.isVisible().catch(() => false)) {
+    if (continueBtn) {
+      if (await isExternalApplication(modal)) return false;
       await continueBtn.click();
       await page.waitForTimeout(1500);
       continue;
     }
 
-    // Look for final Submit button
-    const submitBtn = modal.locator('button').filter({
-      hasText: /submit application|submit|apply/i,
-    }).first();
+    const submitBtn = await findFinalSubmitButton(modal);
 
-    if (await submitBtn.isVisible().catch(() => false)) {
+    if (submitBtn) {
+      // Re-check immediately before the irreversible click.
+      if (await isExternalApplication(modal)) return false;
+      const urlBefore = page.url();
       await submitBtn.click();
-
-      // Wait for success: success marker visible, modal detached, or success text
-      const success = await Promise.race([
-        modal
-          .locator(':has-text("Application submitted"), :has-text("submitted")')
-          .first()
-          .waitFor({ state: 'visible', timeout: 10_000 })
-          .then(() => true)
-          .catch(() => false),
-
-        modal
-          .waitFor({ state: 'detached', timeout: 10_000 })
-          .then(() => true)
-          .catch(() => false),
-
-        page
-          .locator('#success-marker')
-          .first()
-          .waitFor({ state: 'visible', timeout: 10_000 })
-          .then(() => true)
-          .catch(() => false),
-      ]);
-
-      return success;
+      return verifySubmission(page, modal, urlBefore);
     }
 
     // No more buttons found
@@ -186,6 +177,46 @@ export async function submitApplication(
 
   log.info('No submit button found after max steps');
   await takeDebugScreenshot(page, 'no_submit_button');
+  return false;
+}
+
+async function findExactButton(modal: Locator, labels: string[]): Promise<Locator | null> {
+  for (const button of await modal.locator('button').all()) {
+    if (!(await button.isVisible().catch(() => false)) || await button.isDisabled().catch(() => true)) continue;
+    if (labels.includes((await button.innerText().catch(() => '')).trim().toLowerCase())) return button;
+  }
+  return null;
+}
+
+async function findFinalSubmitButton(modal: Locator): Promise<Locator | null> {
+  const stable = modal.locator('button[data-test="submit-application"], button[data-test="submitApplication"]');
+  for (const button of await stable.all()) {
+    if (await button.isVisible().catch(() => false) && !(await button.isDisabled().catch(() => true))) return button;
+  }
+  return findExactButton(modal, ['submit application', 'send application']);
+}
+
+/** Confirms a submission from an explicit success state, never dialog closure alone. */
+export async function verifySubmission(page: Page, modal: Locator, urlBefore: string): Promise<boolean> {
+  const deadline = Date.now() + 10_000;
+  let navigationLogged = false;
+  while (Date.now() < deadline) {
+    const success = page.locator('[data-test="application-success"], [data-test="application-submitted"], [role="status"], [role="alert"]');
+    const confirmed = await success.evaluateAll((elements) => elements.some((element) => {
+      const style = window.getComputedStyle(element);
+      return style.display !== 'none' && style.visibility !== 'hidden' &&
+        /^(?:application sent|application submitted)$/i.test((element.textContent ?? '').trim());
+    })).catch(() => false);
+    if (confirmed) return true;
+
+    if (page.url() !== urlBefore && !navigationLogged) {
+      navigationLogged = true;
+      log.info('Application URL changed; waiting for explicit submission confirmation');
+    }
+    if (await isExternalApplication(modal)) return false;
+    await page.waitForTimeout(250);
+  }
+  log.info('Application submit had no explicit confirmation');
   return false;
 }
 

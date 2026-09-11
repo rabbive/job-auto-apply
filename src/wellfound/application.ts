@@ -143,7 +143,7 @@ export async function hasCaptcha(modal: Locator): Promise<boolean> {
  */
 export async function hasMandatoryAdditionalFields(modal: Locator): Promise<boolean> {
   return modal.evaluate((el) => {
-    const SKIP_TYPES = new Set(['file', 'hidden', 'submit', 'button', 'reset', 'image', 'checkbox', 'radio']);
+    const SKIP_TYPES = new Set(['file', 'hidden', 'submit', 'button', 'reset', 'image']);
 
     const fields = Array.from(
       el.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
@@ -154,7 +154,14 @@ export async function hasMandatoryAdditionalFields(modal: Locator): Promise<bool
     const requiredMessage =
       /(?:this (?:question|field) is required|requires? that you .* to apply)/i;
 
+    const checkedRadioNames = new Set<string>();
     for (const field of fields) {
+      if (field instanceof HTMLInputElement && field.type === 'radio' && field.checked) checkedRadioNames.add(field.name);
+    }
+
+    for (const field of fields) {
+      const style = window.getComputedStyle(field);
+      if (field.hidden || style.display === 'none' || style.visibility === 'hidden' || field.disabled) continue;
       if (field instanceof HTMLInputElement && SKIP_TYPES.has(field.type)) continue;
 
       const labels = Array.from(el.querySelectorAll('label'));
@@ -165,26 +172,23 @@ export async function hasMandatoryAdditionalFields(modal: Locator): Promise<bool
         })
         .map((label) => label.textContent?.trim() ?? '')
         .join(' ');
-
-      let hasRequiredMarker = /\*\s*$/.test(labelText);
-      let hasRequiredMessage = false;
+      let required = field.required || field.getAttribute('aria-required') === 'true' || /\*\s*$/.test(labelText);
       let ancestor = field.parentElement;
-      for (let depth = 0; ancestor && depth < 4; depth++, ancestor = ancestor.parentElement) {
+      for (let depth = 0; !required && ancestor && depth < 4; depth++, ancestor = ancestor.parentElement) {
         const precedingText = ancestor.previousElementSibling?.textContent?.trim() ?? '';
-        if (/\*\s*$/.test(precedingText)) hasRequiredMarker = true;
-        if (requiredMessage.test(ancestor.innerText)) {
-          hasRequiredMessage = true;
-          break;
-        }
+        required = ancestor.getAttribute('aria-required') === 'true' || /\*\s*$/.test(precedingText) || requiredMessage.test(ancestor.innerText);
+      }
+      if (!required) continue;
+
+      if (field instanceof HTMLInputElement && field.type === 'checkbox') {
+        if (!field.checked) return true;
+        continue;
       }
 
-      const isRequired =
-        field.required ||
-        field.getAttribute('aria-required') === 'true' ||
-        hasRequiredMarker ||
-        hasRequiredMessage;
-
-      if (!isRequired) continue;
+      if (field instanceof HTMLInputElement && field.type === 'radio') {
+        if (!checkedRadioNames.has(field.name)) return true;
+        continue;
+      }
 
       const value =
         field instanceof HTMLSelectElement

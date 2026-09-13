@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Orb resume for job-auto-apply. Runs after activation and every time a paused
+# orb wakes. Amp waits at most 10 seconds — keep this fast and idempotent.
+# No installs here: if something setup provided is gone, fail loudly so the
+# agent sees it and can rerun .agents/setup.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+fail=0
+check() {
+  if eval "$2"; then
+    echo "resume: OK   - $1"
+  else
+    echo "resume: FAIL - $1 (rerun .agents/setup)"
+    fail=1
+  fi
+}
+
+check "node on PATH"            "command -v node >/dev/null 2>&1"
+check "pnpm on PATH"            "command -v pnpm >/dev/null 2>&1"
+check "node_modules present"    "[ -d node_modules ]"
+check "Playwright Chromium"     "ls \"$HOME\"/.cache/ms-playwright/chromium-*/chrome-linux*/chrome >/dev/null 2>&1"
+
+exit "$fail"

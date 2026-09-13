@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Orb setup for job-auto-apply. Runs once per fresh orb (and again whenever
+# Amp refreshes a stale snapshot). Must be non-interactive, idempotent, and
+# fast on a warm filesystem. Logs land in ~/.cache/amp/logs/setup.log.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+step() { printf '\n[%s] == %s\n' "$(date +%H:%M:%S)" "$*"; }
+
+step "Ensuring pnpm is available"
+if ! command -v pnpm >/dev/null 2>&1; then
+  corepack enable
+fi
+pnpm --version
+
+step "Installing Node dependencies (pnpm install --frozen-lockfile)"
+pnpm install --frozen-lockfile
+
+step "Installing Playwright Chromium system dependencies"
+# playwright's dry-run prints only the apt packages that are still missing,
+# so a warm orb skips `apt-get update` and the network entirely.
+mapfile -t missing < <(pnpm exec playwright install-deps --dry-run chromium 2>/dev/null | sed -n 's/^  \+\(\S.*\)$/\1/p')
+if ((${#missing[@]})); then
+  echo "Missing: ${missing[*]}"
+  sudo apt-get update
+  sudo apt-get install -y "${missing[@]}"
+else
+  echo "All system dependencies already installed."
+fi
+
+step "Installing Playwright Chromium browser"
+# Skips the download when the browser is already in ~/.cache/ms-playwright.
+pnpm exec playwright install chromium
+
+step "Creating .env from template"
+if [ -f .env ]; then
+  echo ".env already exists, leaving it untouched."
+else
+  cp -- .env.example .env
+fi
+
+step "Recording orb-specific agent guidance"
+# The automation launches a headed browser (headless: false); agents working
+# in this orb need to know where a display comes from.
+guidance_file="$HOME/.config/amp/AGENTS.md"
+guidance_marker="# job-auto-apply orb notes"
+mkdir -p "$HOME/.config/amp"
+if ! grep -Fqx "$guidance_marker" "$guidance_file" 2>/dev/null; then
+  cat >> "$guidance_file" <<'EOF'
+
+# job-auto-apply orb notes
+- `node_modules`, Playwright Chromium, and its system dependencies are preinstalled by `.agents/setup`; do not reinstall them.
+- The tool launches a headed browser (`headless: false`) and waits for ENTER. Use the orb Desktop for a display, or prefix with `xvfb-run -a` when no Desktop is attached.
+- The persistent browser profile (login session) lives in `~/.wellfound-automation/browser-profile/`.
+EOF
+fi
+
+step "Setup complete"
